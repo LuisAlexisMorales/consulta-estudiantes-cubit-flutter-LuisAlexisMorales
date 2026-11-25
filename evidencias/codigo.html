@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Código del reto</title>
+<style>
+  body { margin: 0; padding: 18px; background: #fafafa; color: #17202a;
+         font-family: Consolas, "Courier New", monospace; }
+  h1 { font-size: 18px; margin: 0 0 12px; font-family: Segoe UI, sans-serif; }
+  .cols { display: flex; gap: 18px; }
+  section { flex: 1; min-width: 0; background: white; border: 1px solid #d5d8dc;
+             border-radius: 6px; padding: 10px; }
+  h2 { font-size: 13px; margin: 0 0 8px; font-family: Segoe UI, sans-serif;
+        color: #283593; }
+  pre { margin: 0; font-size: 10.5px; line-height: 13px; white-space: pre-wrap;
+         word-break: break-word; }
+</style>
+</head>
+<body>
+<h1>Práctica Cubit — código del reto (Cubit y pantalla)</h1>
+<div class="cols"><section><h2>estudiantes_cubit.dart</h2><pre>import &#x27;dart:async&#x27;;
+
+import &#x27;package:flutter_bloc/flutter_bloc.dart&#x27;;
+import &#x27;package:http/http.dart&#x27; as http;
+
+import &#x27;../services/estudiante_service.dart&#x27;;
+import &#x27;estudiantes_state.dart&#x27;;
+
+/// Guarda el estado actual y decide qué estado emitir en cada consulta.
+class EstudiantesCubit extends Cubit&lt;EstudiantesState&gt; {
+  final EstudianteService _servicio;
+
+  EstudiantesCubit(this._servicio) : super(const EstudiantesInicial());
+
+  Future&lt;void&gt; cargarEstudiantes() async {
+    emit(const EstudiantesCarga());
+
+    try {
+      final datos = await _servicio.obtenerEstudiantes();
+
+      if (datos.isEmpty) {
+        emit(const EstudiantesVacio());
+      } else {
+        emit(EstudiantesExito(datos));
+      }
+    } on TimeoutException catch (_) {
+      // Reto 2: el servidor tardó más del tiempo permitido.
+      emit(const EstudiantesError(
+        &#x27;Tiempo de espera agotado. Inténtalo de nuevo más tarde.&#x27;,
+      ));
+    } on http.ClientException catch (_) {
+      // Reto 2: normalmente significa que no hay conexión a internet.
+      emit(const EstudiantesError(
+        &#x27;Sin conexión a internet. Revisa tu red e inténtalo de nuevo.&#x27;,
+      ));
+    } on ErrorServidorException catch (e) {
+      // Reto 2: la API respondió, pero con un código de error (500, 404...).
+      emit(EstudiantesError(&#x27;Error del servidor (${e.codigo}).&#x27;));
+    } catch (_) {
+      // Reto 2: cualquier otra causa (JSON inválido, etc.).
+      emit(const EstudiantesError(
+        &#x27;No se pudieron cargar los datos. Inténtalo de nuevo.&#x27;,
+      ));
+    }
+  }
+
+  /// Reto 3: vuelve al estado inicial.
+  void reiniciar() =&gt; emit(const EstudiantesInicial());
+}
+</pre></section><section><h2>estudiantes_page.dart</h2><pre>import &#x27;package:flutter/material.dart&#x27;;
+import &#x27;package:flutter_bloc/flutter_bloc.dart&#x27;;
+
+import &#x27;../cubit/estudiantes_cubit.dart&#x27;;
+import &#x27;../cubit/estudiantes_state.dart&#x27;;
+
+/// Una vista distinta para cada uno de los cinco estados.
+class EstudiantesPage extends StatelessWidget {
+  const EstudiantesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // Reto 4: el título depende del estado (segundo BlocBuilder).
+      appBar: AppBar(
+        title: BlocBuilder&lt;EstudiantesCubit, EstudiantesState&gt;(
+          builder: (context, state) {
+            final cantidad = switch (state) {
+              EstudiantesExito(:final estudiantes) =&gt; estudiantes.length,
+              _ =&gt; 0,
+            };
+
+            return Text(
+              cantidad &gt; 0
+                  ? &#x27;Consulta de estudiantes ($cantidad)&#x27;
+                  : &#x27;Consulta de estudiantes&#x27;,
+            );
+          },
+        ),
+        // Reto 3: botón de reinicio en la barra superior.
+        actions: [
+          IconButton(
+            tooltip: &#x27;Reiniciar&#x27;,
+            icon: const Icon(Icons.restart_alt),
+            onPressed: () =&gt; context.read&lt;EstudiantesCubit&gt;().reiniciar(),
+          ),
+        ],
+      ),
+      body: BlocBuilder&lt;EstudiantesCubit, EstudiantesState&gt;(
+        builder: (context, state) {
+          return switch (state) {
+            EstudiantesInicial() =&gt; const Center(
+                child: Text(&#x27;Presiona el botón para comenzar&#x27;),
+              ),
+            EstudiantesCarga() =&gt; const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 12),
+                    Text(&#x27;Cargando estudiantes...&#x27;),
+                  ],
+                ),
+              ),
+            EstudiantesVacio() =&gt; const Center(
+                child: Text(&#x27;No hay estudiantes registrados&#x27;),
+              ),
+            EstudiantesError(:final mensaje) =&gt; Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                      const SizedBox(height: 8),
+                      Text(mensaje, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: () =&gt; context
+                            .read&lt;EstudiantesCubit&gt;()
+                            .cargarEstudiantes(),
+                        child: const Text(&#x27;Reintentar&#x27;),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            EstudiantesExito(:final estudiantes) =&gt; ListView.builder(
+                itemCount: estudiantes.length,
+                itemBuilder: (context, index) {
+                  final e = estudiantes[index];
+                  return ListTile(
+                    leading: CircleAvatar(child: Text(&#x27;${e.id}&#x27;)),
+                    title: Text(e.nombre),
+                    // Reto 1: correo y ciudad en el subtítulo.
+                    subtitle: Text(&#x27;${e.correo}\n${e.ciudad}&#x27;),
+                    isThreeLine: true,
+                  );
+                },
+              ),
+          };
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () =&gt; context.read&lt;EstudiantesCubit&gt;().cargarEstudiantes(),
+        icon: const Icon(Icons.download),
+        label: const Text(&#x27;Cargar estudiantes&#x27;),
+      ),
+    );
+  }
+}
+</pre></section></div>
+</body>
+</html>
